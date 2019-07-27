@@ -2,7 +2,7 @@
 BASH script to asses linux server performance of various resources
 ___
 
-The script asseses the performance of CPU, Disk I/O, Memory I/O and Network Up/Down link speed. 
+The script asses the performance of CPU, Disk I/O, Memory I/O and Network Up/Down link speed. 
 The referance benchmark score is set to ~4000 on the following referance machine:
 
 - **Provider:** AWS
