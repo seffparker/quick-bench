@@ -1,0 +1,205 @@
+#!/bin/bash
+
+# Author: Seff P.
+
+SCRIPT_NAME="Quick Bench"
+VERSION="v1.2 build 20190727"
+
+BIN_DEPS="wget bc python dd time awk"
+ITERATION=5
+DUMP="dump-$RANDOM"
+
+CPU_INT_FACTOR="1465"
+CPU_FLOAT_FACTOR="10840"
+DISK_WRITE_FACTOR="7.74"
+DISK_READ_FACTOR="7.724"
+RAM_WRITE_FACTOR="0.3367"
+RAM_READ_FACTOR="0.1808"
+NW_DOWN_FACTOR="4.622"
+NW_UP_FACTOR="5.895"
+
+CPU_CORES=$(grep -c processor /proc/cpuinfo)
+MEMORY_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+MEMORY_GB=$(echo "scale=2; $MEMORY_KB / 1013196" | bc -l)
+
+FAIL(){
+	echo -e '\e[91m[ FAIL ]\e[0m'
+}
+
+DONE(){
+	echo -e '\e[92m[ DONE ]\e[0m'
+}
+
+SKIP(){
+	echo -e '\e[93m[ SKIP ]\e[0m'
+}
+
+BEGIN(){
+	echo -e '\e[94m[ BEGIN ]\e[0m'
+}
+
+printdate(){
+	echo -n "$(date +'[%F %T %Z]') - "
+}
+
+cleanup(){
+	echo -n "$(printdate)Cleaning temporary files "
+	rm -f /$DUMP /dev/shm/$DUMP /tmp/cpu-int /tmp/cpu-float
+	DONE
+}
+
+intr(){
+	echo
+	cleanup
+	exit 1
+}	
+
+trap intr INT
+
+echo "$(printdate)Starting $SCRIPT_NAME $VERSION $(BEGIN)"
+echo -n "$(printdate)Checking ROOT access "
+if [ $UID -eq 0 ]
+	then DONE
+else
+	FAIL
+	exit 1
+fi
+
+echo -n "$(printdate)Checking for required binaries... "
+for BIN in $BIN_DEPS
+	do
+	if ! which $BIN &> /dev/null
+		then 
+		BINS_MISSING+=($BIN)
+	fi
+done
+if [ "${BINS_MISSING[*]}" ]
+	then
+	echo "${BINS_MISSING[*]} not found. $(FAIL)"
+	exit 2
+else
+	DONE
+fi
+
+echo -n "$(printdate)Downloading python speedtest-cli "
+if [ -f /tmp/speedtest-cli ]
+	then SKIP
+else
+	wget -qO /tmp/speedtest-cli https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py
+	DONE
+fi
+TEST_BEGIN=$(date +%s)
+echo -n "$(printdate)Testing CPU integer performance "
+echo '2^2^20' | /usr/bin/time -o /tmp/cpu-int -f %e bc > /dev/null
+CPU_INT=$(cat /tmp/cpu-int)
+DONE
+
+echo -n "$(printdate)Testing CPU float performance "
+/usr/bin/time -o /tmp/cpu-float -f %e bc -lq <<< "scale=5000;4*a(1)" > /dev/null
+CPU_FLOAT=$(cat /tmp/cpu-float)
+DONE
+
+echo -n "$(printdate)Testing disk I/O performance ($ITERATION iterations) "
+DISK_FREE=$(df -P | awk '/\/$/ {print $4}')
+if [ $DISK_FREE -lt 1572864 ]
+	then let DUMP_KB=($DISK_FREE / 2)
+else
+	DUMP_KB=1048576
+fi
+let COUNT=($DUMP_KB / 4)
+for i in $(seq $ITERATION)
+	do
+	TIME_WRITE_BEGIN=$(date +%s.%N)
+	dd if=/dev/zero of=/$DUMP bs=4096 count=${COUNT} conv=fsync &> /dev/null
+	TIME_WRITE_END=$(date +%s.%N)
+	TIMES_WRITE+=($(echo $TIME_WRITE_END - $TIME_WRITE_BEGIN | bc))
+	sync
+	echo 3 > /proc/sys/vm/drop_caches
+	TIME_READ_BEGIN=$(date +%s.%N)
+	dd if=/$DUMP of=/dev/null bs=4096 count=${COUNT} &> /dev/null
+	TIME_READ_END=$(date +%s.%N)
+	TIMES_READ+=($(echo $TIME_READ_END - $TIME_READ_BEGIN | bc))
+	rm -f /$DUMP
+	echo -n .
+done
+IFS="+"
+TIMES_WRITE_TOTAL=$(echo "(${TIMES_WRITE[*]})" | bc)
+TIMES_READ_TOTAL=$(echo "(${TIMES_READ[*]})" | bc)
+TOTAL_MB=$(echo "$DUMP_KB / 1024 * $ITERATION" | bc )
+DISK_WRITE_AVG_MBPS=$(echo "scale=2; $TOTAL_MB / $TIMES_WRITE_TOTAL" | bc -l)
+DISK_READ_AVG_MBPS=$(echo "scale=2; $TOTAL_MB / $TIMES_READ_TOTAL" | bc -l)
+unset TIMES_WRITE TIMES_READ IFS
+DONE
+
+echo -n "$(printdate)Testing memory I/O performance ($ITERATION iterations) "
+RAM_DISK_FREE=$(df -P | awk '/\dev\/shm$/ {print $4}')
+if [ $RAM_DISK_FREE -lt 1048576 ]
+	then let DUMP_KB=($RAM_DISK_FREE / 2)
+else
+	DUMP_KB=524288
+fi
+let COUNT=($DUMP_KB / 4)
+
+for i in $(seq $ITERATION)
+	do
+	echo 3 > /proc/sys/vm/drop_caches
+	TIME_WRITE_BEGIN=$(date +%s.%N)
+	dd if=/dev/zero of=/dev/shm/$DUMP bs=4096 count=${COUNT} conv=fsync &> /dev/null
+	TIME_WRITE_END=$(date +%s.%N)
+	TIMES_WRITE+=($(echo $TIME_WRITE_END - $TIME_WRITE_BEGIN | bc))
+	echo 3 > /proc/sys/vm/drop_caches
+	TIME_READ_BEGIN=$(date +%s.%N)
+	dd if=/dev/shm/$DUMP of=/dev/null bs=4096 count=${COUNT} &> /dev/null
+	TIME_READ_END=$(date +%s.%N)
+	TIMES_READ+=($(echo $TIME_READ_END - $TIME_READ_BEGIN | bc))
+	rm -f /dev/shm/$DUMP
+	echo -n .
+done
+
+IFS="+"
+TIMES_WRITE_TOTAL=$(echo "(${TIMES_WRITE[*]})" | bc)
+TIMES_READ_TOTAL=$(echo "(${TIMES_READ[*]})" | bc)
+TOTAL_MB=$(echo "$DUMP_KB / 1024 * $ITERATION" | bc )
+RAM_WRITE_AVG_MBPS=$(echo "scale=2; $TOTAL_MB / $TIMES_WRITE_TOTAL" | bc -l)
+RAM_READ_AVG_MBPS=$(echo "scale=2; $TOTAL_MB / $TIMES_READ_TOTAL" | bc -l)
+unset IFS
+DONE
+
+echo -n "$(printdate)Testing network performance ($ITERATION iterations) "
+for i in $(seq $ITERATION)
+        do
+	NW_PERF=$(python /tmp/speedtest-cli --csv --csv-delimiter "|")
+	DOWN_BPS+=($(echo "$NW_PERF" | cut -d'|' -f7))
+	UP_BPS+=($(echo "$NW_PERF" | cut -d'|' -f8))
+	echo -n .
+done
+IFS="+"
+DOWN_BPS_AVG=$(echo "(${DOWN_BPS[*]}) / $ITERATION" | bc)
+UP_BPS_AVG=$(echo "(${UP_BPS[*]}) / $ITERATION" | bc)
+DOWN_MBPS=$(echo "scale=2; $DOWN_BPS_AVG / 8388608" | bc -l)
+UP_MBPS=$(echo "scale=2; $UP_BPS_AVG / 8388608" | bc -l)
+unset IFS 
+DONE
+TEST_END=$(date +%s)
+let TEST_TIME=($TEST_END - $TEST_BEGIN)
+
+cleanup
+
+CPU_INT_SCORE=$(echo "$CPU_INT_FACTOR * $CPU_CORES / $CPU_INT" | bc)
+CPU_FLOAT_SCORE=$(echo "$CPU_FLOAT_FACTOR * $CPU_CORES / $CPU_FLOAT" | bc)
+DISK_WRITE_SCORE=$(echo "$DISK_WRITE_FACTOR * $DISK_WRITE_AVG_MBPS" | bc)
+DISK_READ_SCORE=$(echo "$DISK_READ_FACTOR * $DISK_READ_AVG_MBPS" | bc)
+RAM_WRITE_SCORE=$(echo "$RAM_WRITE_FACTOR * $RAM_WRITE_AVG_MBPS * $MEMORY_GB" | bc)
+RAM_READ_SCORE=$(echo "$RAM_READ_FACTOR * $RAM_READ_AVG_MBPS * $MEMORY_GB" | bc)
+NW_DOWN_SCORE=$(echo "$NW_DOWN_FACTOR * $DOWN_MBPS" | bc)
+NW_UP_SCORE=$(echo "$NW_UP_FACTOR * $UP_MBPS" | bc)
+TOTAL_SCORE=$(echo "$CPU_INT_SCORE + $CPU_FLOAT_SCORE + $DISK_WRITE_SCORE + $DISK_READ_SCORE + $RAM_WRITE_SCORE + $RAM_READ_SCORE + $NW_DOWN_SCORE + $NW_UP_SCORE" | bc)
+
+echo
+echo "Test duration: $TEST_TIME seconds"
+echo "CPU int: Up to 315653 digits in $CPU_INT seconds. CPU int score: $CPU_INT_SCORE"
+echo "CPU float: Value of Pi upto 5000 decimals in $CPU_FLOAT seconds. CPU float score: $CPU_FLOAT_SCORE"
+echo "Disk: write: $DISK_WRITE_AVG_MBPS MiB/sec, read: $DISK_READ_AVG_MBPS MiB/sec. Disk I/O write score: $DISK_WRITE_SCORE, read: $DISK_READ_SCORE"
+echo "Memory: write: $RAM_WRITE_AVG_MBPS MiB/sec, read: $RAM_READ_AVG_MBPS MiB/sec. Memory I/O write score: $RAM_WRITE_SCORE, read: $RAM_READ_SCORE"
+echo "Network: Download = $DOWN_MBPS MB/s, Upload = $UP_MBPS MB/s. N/W Download score: $NW_DOWN_SCORE, upload: $NW_UP_SCORE"
+echo "Total Score: $TOTAL_SCORE"
