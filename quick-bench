@@ -21,6 +21,10 @@ NW_UP_FACTOR="5.895"
 CPU_CORES=$(grep -c processor /proc/cpuinfo)
 MEMORY_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 MEMORY_GB=$(echo "scale=2; $MEMORY_KB / 1013196" | bc -l)
+if ! [[ "$MEMORY_GB" =~ ^0 ]]
+	then
+	MEMORY_GB=$(echo "($MEMORY_GB + 0.5) / 1" | bc )
+fi
 
 FAIL(){
 	echo -e '\e[91m[ FAIL ]\e[0m'
@@ -185,21 +189,25 @@ let TEST_TIME=($TEST_END - $TEST_BEGIN)
 
 cleanup
 
-CPU_INT_SCORE=$(echo "$CPU_INT_FACTOR * $CPU_CORES / $CPU_INT" | bc)
-CPU_FLOAT_SCORE=$(echo "$CPU_FLOAT_FACTOR * $CPU_CORES / $CPU_FLOAT" | bc)
+CPU_INT_SCORE_PER_CPU=$(echo "$CPU_INT_FACTOR / $CPU_INT" | bc)
+CPU_INT_SCORE=$(echo "$CPU_INT_SCORE_PER_CPU * $CPU_CORES" | bc)
+CPU_FLOAT_SCORE_PER_CPU=$(echo "$CPU_FLOAT_FACTOR * $CPU_CORES / $CPU_FLOAT" | bc)
+CPU_FLOAT_SCORE=$(echo "$CPU_FLOAT_SCORE_PER_CPU * $CPU_CORES" | bc)
 DISK_WRITE_SCORE=$(echo "$DISK_WRITE_FACTOR * $DISK_WRITE_AVG_MBPS" | bc)
 DISK_READ_SCORE=$(echo "$DISK_READ_FACTOR * $DISK_READ_AVG_MBPS" | bc)
-RAM_WRITE_SCORE=$(echo "$RAM_WRITE_FACTOR * $RAM_WRITE_AVG_MBPS * $MEMORY_GB" | bc)
-RAM_READ_SCORE=$(echo "$RAM_READ_FACTOR * $RAM_READ_AVG_MBPS * $MEMORY_GB" | bc)
+RAM_WRITE_SCORE_PER_GB=$(echo "$RAM_WRITE_FACTOR * $RAM_WRITE_AVG_MBPS" | bc)
+RAM_WRITE_SCORE=$(echo "$RAM_WRITE_SCORE_PER_GB * $MEMORY_GB" | bc)
+RAM_READ_SCORE_PER_GB=$(echo "$RAM_READ_FACTOR * $RAM_READ_AVG_MBPS * $MEMORY_GB" | bc)
+RAM_READ_SCORE=$(echo "$RAM_READ_SCORE_PER_GB * $MEMORY_GB" | bc)
 NW_DOWN_SCORE=$(echo "$NW_DOWN_FACTOR * $DOWN_MBPS" | bc)
 NW_UP_SCORE=$(echo "$NW_UP_FACTOR * $UP_MBPS" | bc)
 TOTAL_SCORE=$(echo "$CPU_INT_SCORE + $CPU_FLOAT_SCORE + $DISK_WRITE_SCORE + $DISK_READ_SCORE + $RAM_WRITE_SCORE + $RAM_READ_SCORE + $NW_DOWN_SCORE + $NW_UP_SCORE" | bc)
 
 echo
 echo "Test duration: $TEST_TIME seconds"
-echo "CPU int: Up to 315653 digits in $CPU_INT seconds. CPU int score: $CPU_INT_SCORE"
-echo "CPU float: Value of Pi upto 5000 decimals in $CPU_FLOAT seconds. CPU float score: $CPU_FLOAT_SCORE"
+echo "CPU int: Up to 315653 digits in $CPU_INT seconds. CPU int score: $CPU_INT_SCORE_PER_CPU x $CPU_CORES = $CPU_INT_SCORE"
+echo "CPU float: Value of Pi upto 5000 decimals in $CPU_FLOAT seconds. CPU float score: $CPU_FLOAT_SCORE_PER_CPU x $CPU_CORES = $CPU_FLOAT_SCORE"
 echo "Disk: write: $DISK_WRITE_AVG_MBPS MiB/sec, read: $DISK_READ_AVG_MBPS MiB/sec. Disk I/O write score: $DISK_WRITE_SCORE, read: $DISK_READ_SCORE"
-echo "Memory: write: $RAM_WRITE_AVG_MBPS MiB/sec, read: $RAM_READ_AVG_MBPS MiB/sec. Memory I/O write score: $RAM_WRITE_SCORE, read: $RAM_READ_SCORE"
+echo "Memory: write: $RAM_WRITE_AVG_MBPS MiB/sec, read: $RAM_READ_AVG_MBPS MiB/sec. Memory I/O write score: $RAM_WRITE_SCORE_PER_GB x $MEMORY_GB = $RAM_WRITE_SCORE, read: $RAM_READ_SCORE_PER_GB x $MEMORY_GB = $RAM_READ_SCORE"
 echo "Network: Download = $DOWN_MBPS MB/s, Upload = $UP_MBPS MB/s. N/W Download score: $NW_DOWN_SCORE, upload: $NW_UP_SCORE"
 echo "Total Score: $TOTAL_SCORE"
