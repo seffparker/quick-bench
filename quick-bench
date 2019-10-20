@@ -18,11 +18,6 @@ RAM_READ_FACTOR="0.1808"
 NW_DOWN_FACTOR="4.622"
 NW_UP_FACTOR="5.895"
 
-if ! [[ "$MEMORY_GB" =~ ^0 ]]
-	then
-	MEMORY_GB=$(echo "($MEMORY_GB + 0.5) / 1" | bc )
-fi
-
 FAIL(){
 	echo -e '\e[91m[ FAIL ]\e[0m'
 }
@@ -93,6 +88,10 @@ fi
 CPU_CORES=$(grep -c processor /proc/cpuinfo)
 MEMORY_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 MEMORY_GB=$(echo "scale=2; $MEMORY_KB / 1013196" | bc -l)
+if ! [[ "$MEMORY_GB" =~ ^0 ]]
+	then
+	MEMORY_GB=$(echo "($MEMORY_GB + 0.5) / 1" | bc )
+fi
 
 TEST_BEGIN=$(date +%s)
 echo -n "$(printdate)Testing CPU integer performance "
