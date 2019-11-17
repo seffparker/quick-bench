@@ -14,3 +14,9 @@ The referance benchmark score is set to ~4000 on the following referance machine
 - **Storage:** EBS SSD gp2 (100 iops)
 - **OS:** CentOS 7.6 Core
 - **Kernel:** 3.10.0
+
+### Usage
+`# bash quick-bench`
+
+### Dependancies 
+The script requires the following binaries to be installed on the assessing machine: **wget bc python dd time awk**
